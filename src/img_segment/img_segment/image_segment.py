@@ -1,84 +1,125 @@
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import PointCloud2, Image
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
+import sensor_msgs_py.point_cloud2 as pc2
+
+base_topic = "/camera/camera"
+depth_topic = "/depth/color/points"
+image_topic = "/color/image_raw"
 
 class RealSenseSegmentation(Node):
-
     def __init__(self):
         super().__init__('realsense_segmentation')
-        
         self.bridge = CvBridge()
 
         # Subscribe to the color and depth image topics
         self.color_subscriber = self.create_subscription(
-            Image, '/camera/color/image_raw', self.color_callback, 10)
+            Image, base_topic + image_topic, self.color_callback, 10)
+        
+        print("Initialized color subscriber!")
         
         self.depth_subscriber = self.create_subscription(
-            Image, '/camera/depth/image_raw', self.depth_callback, 10)
+            PointCloud2, base_topic + depth_topic, self.depth_callback, 10)
+        
+        print("Initialized depth subscriber!")
 
         self.color_image = None
-        self.depth_image = None
+        self.depth_data = None
 
     def color_callback(self, msg):
         """Callback to process the color image"""
         try:
             # Convert ROS image message to OpenCV format
             self.color_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            self.process_images()
+
+            # Call detect_obstacless to detect and display objects
+            self.detect_obstacles()
         except Exception as e:
             self.get_logger().error(f"Error in color image callback: {e}")
 
     def depth_callback(self, msg):
-        """Callback to process the depth image"""
+        """Callback to process the depth data"""
         try:
-            # Convert ROS image message to OpenCV format (depth image)
-            self.depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='16UC1')
-            self.process_images()
+            # Convert ROS PointCloud2 message to a list of 3D points
+            # print(msg)
+            self.depth_data = pc2.read_points_list(msg, field_names=("x", "y", "z"), skip_nans=True)
+            
+            self.detect_obstacles()
+            # print(self.depth_data)
         except Exception as e:
             self.get_logger().error(f"Error in depth image callback: {e}")
 
-    def process_images(self):
-        """Perform segmentation and distance measurement"""
-        if self.color_image is None or self.depth_image is None:
+    def detect_obstacles(self):
+        """Detect obstacles and calculate distances."""
+        if self.color_image is None or self.depth_data is None:
             return
-        
-        # Define the color for segmentation (e.g., red)
-        lower_color = np.array([0, 0, 100])
-        upper_color = np.array([50, 50, 255])
 
-        # Segment the image based on the color range (Red in this case)
-        mask = cv2.inRange(self.color_image, lower_color, upper_color)
-        segmented_image = cv2.bitwise_and(self.color_image, self.color_image, mask=mask)
+        # Convert image to grayscale
+        gray = cv2.cvtColor(self.color_image, cv2.COLOR_BGR2GRAY)
 
-        # Find the coordinates of non-zero mask pixels
-        non_zero_coords = np.column_stack(np.where(mask > 0))
+        # Apply Gaussian blur
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        # Assuming depth_image is in mm (RealSense depth data format)
-        for coord in non_zero_coords:
-            # Get depth (in mm) at the coordinate (y, x)
-            depth = self.depth_image[coord[0], coord[1]]
-            distance_in_meters = depth * 0.001  # Convert from mm to meters
-            self.get_logger().info(f"Distance at ({coord[1]}, {coord[0]}): {distance_in_meters:.2f} meters")
-        
-        # Show the segmented image using OpenCV
-        cv2.imshow("Segmented Image", segmented_image)
-        cv2.waitKey(1)  # Refresh window
+        # Apply edge detection (Canny)
+        edges = cv2.Canny(blurred, 50, 150)
+
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        for contour in contours:
+            # Filter out small contours
+            if cv2.contourArea(contour) < 500:
+                continue
+
+            # Draw bounding box around the contour
+            x, y, w, h = cv2.boundingRect(contour)
+            cv2.rectangle(self.color_image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            # Calculate centroid for depth filtering
+            centroid_x = x + w // 2
+            centroid_y = y + h // 2
+
+            # Get the depth value at the centroid
+            distance = self.get_depth_at_point(centroid_x, centroid_y)
+            
+            # print(distance)
+            
+            if distance != -1 and 0.5 < distance < 5.0:  # Filter objects within 0.5m to 5m range
+                cv2.putText(self.color_image, f"{distance:.2f} m", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                self.get_logger().info(f"Obstacle at ({centroid_x}, {centroid_y}) - Distance: {distance:.2f} m")
+
+
+        # Display the results
+        cv2.imshow("Obstacle Detection", self.color_image)
+        cv2.waitKey(1)
+
+    def get_depth_at_point(self, x, y):
+        """Find the depth value at a given pixel."""
+        for point in self.depth_data:
+            px, py, pz = point
+            # print(f"x: {px}, y: {py}, z: {pz}\n")
+            if int(px) == x and int(py) == y:
+                return pz  # Return the Z-coordinate (distance in meters)
+        return -1  # Return -1 if no depth found
+
 
 def main(args=None):
     rclpy.init(args=args)
-
     node = RealSenseSegmentation()
 
-    # Spin the node to keep it alive and process incoming messages
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
-    # Shutdown ROS when done
-    node.destroy_node()
-    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-    
