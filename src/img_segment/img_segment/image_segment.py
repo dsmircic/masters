@@ -72,7 +72,6 @@ class RealSenseSegmentation(Node):
                     if 0.5 < distance < 5.0:  # Filter valid distances
                         cv2.putText(self.color_image, f"{distance:.2f} m", (x1, y2 + 20),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-                        self.get_logger().info(f"Detected obstacle at ({center_x}, {center_y}) - Distance: {distance:.2f} m")
 
         # Display the annotated image
         cv2.imshow("Obstacle Detection", self.color_image)
