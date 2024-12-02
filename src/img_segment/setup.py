@@ -22,7 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'segment_node = img_segment.img_segment:main',  # Update this based on your script
+            'segment_node = img_segment.image_segment:main',  # Update this based on your script
         ],
     },
 )
