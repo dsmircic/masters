@@ -12,9 +12,6 @@ image_topic_sub = "/color/image_raw"
 
 image_topic_pub = "/yolo/detect/image"
 
-scale_x = 640 / 1280
-scale_y = 480 / 720
-
 timer_period = 0.5
 
 class RealSenseSegmentation(Node):
@@ -98,8 +95,8 @@ class RealSenseSegmentation(Node):
                 x1, y1, x2, y2 = map(int, box)  # Convert coordinates to integers
                 
                 # find center pixels for the given object
-                center_x = int(((x1 + x2) / 2) * scale_x)
-                center_y = int(((y1 + y2) / 2) * scale_y)
+                center_x = int(((x1 + x2) / 2))
+                center_y = int(((y1 + y2) / 2))
 
 
                 # Annotate detected objects
@@ -118,8 +115,8 @@ class RealSenseSegmentation(Node):
             
 
         # Display the annotated image
-        # cv2.imshow("Obstacle Detection", self.color_image)
-        # cv2.waitKey(1)
+        cv2.imshow("Obstacle Detection", self.color_image)
+        cv2.waitKey(1)
 
 
 def main(args=None):
