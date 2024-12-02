@@ -10,6 +10,9 @@ base_topic = "/camera/camera"
 depth_topic = "/depth/image_rect_raw"
 image_topic = "/color/image_raw"
 
+scale_x = 640 / 1280
+scale_y = 480 / 720
+
 class RealSenseSegmentation(Node):
     def __init__(self):
         super().__init__('realsense_segmentation')
@@ -59,6 +62,10 @@ class RealSenseSegmentation(Node):
             # Loop through detected boxes
             for box, conf, cls in zip(boxes, confidences, classes):
                 x1, y1, x2, y2 = map(int, box)  # Convert coordinates to integers
+                
+                # find center pixels for the given object
+                center_x = int(((x1 + x2) / 2) * scale_x)
+                center_y = int(((y1 + y2) / 2) * scale_y)
 
                 # Annotate detected objects
                 label = f"{self.model.names[int(cls)]} {conf:.2f}"
@@ -66,12 +73,13 @@ class RealSenseSegmentation(Node):
                 cv2.putText(self.color_image, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
                 # Get depth at the center of the detected object
-                center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
                 if 0 <= center_x < self.depth_image.shape[1] and 0 <= center_y < self.depth_image.shape[0]:
                     distance = self.depth_image[center_y, center_x] / 1000.0  # Convert to meters
-                    if 0.5 < distance < 5.0:  # Filter valid distances
-                        cv2.putText(self.color_image, f"{distance:.2f} m", (x1, y2 + 20),
+                    
+                    cv2.putText(self.color_image, f"{distance:.2f} m", (x1, y2 + 20),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+            
 
         # Display the annotated image
         cv2.imshow("Obstacle Detection", self.color_image)
