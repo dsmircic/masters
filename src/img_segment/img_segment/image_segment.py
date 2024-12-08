@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from img_segment.msg import BoundingBoxes
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -112,7 +113,6 @@ class RealSenseSegmentation(Node):
                     cv2.putText(self.color_image, f"{distance:.2f} m", (x1, y2 + 20),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-            
 
         # Display the annotated image
         cv2.imshow("Obstacle Detection", self.color_image)
