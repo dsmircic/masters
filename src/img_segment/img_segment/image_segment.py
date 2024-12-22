@@ -6,9 +6,6 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from robot_interfaces.msg import BoundingBox, BoundingBoxes
-from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point
-from std_msgs.msg import ColorRGBA
 
 # https://opencvpython.blogspot.com/2012/06/contours-3-extraction.html segmentation coordinates
 
@@ -30,6 +27,11 @@ class Point2D():
     
     def __repr__(self):
         return f"({self.x}, {self.y})"
+    
+    def __iter__(self):
+        # Make the object iterable, yielding x and y
+        yield self.x
+        yield self.y
 
 class RealSenseSegmentation(Node):
     def __init__(self):
@@ -39,51 +41,26 @@ class RealSenseSegmentation(Node):
         # Load YOLO model
         self.model = YOLO('yolov8n-seg.pt', verbose=False)
         
+        self.declare_parameter('input_realsense_img',   '/camera/color/image_raw')
+        self.declare_parameter('input_realsense_depth', '/camera/depth/image_rect_raw')
+        self.declare_parameter('output_bbox_topic',     '/yolo/detect/bounding_box')
+        self.declare_parameter('minimal_confidence',     0.4)
+        self.declare_parameter('interested_classes',    ['person', 'dog', 'clock', 'tv', 'laptop'])
+        
+        self.topic_realsense_img        = self.get_parameter('input_realsense_img').value
+        self.topic_realsense_depth      = self.get_parameter('input_realsense_depth').value
+        self.topic_yolo_bbox            = self.get_parameter('output_bbox_topic').value
+        self.interested_classes         = self.get_parameter('interested_classes').value
+        self.minimal_confidence         = self.get_parameter('minimal_confidence').value
+        
         # Subscribe to the color and depth image topics
-        self.color_subscriber = self.create_subscription(
-            Image, 
-            topic_realsense_base + topic_image, 
-            self.color_callback, 
-            10
-        )
+        self.color_subscriber = self.create_subscription(Image, self.topic_realsense_img, self.color_callback, 10)
         
-        self.depth_subscriber = self.create_subscription(
-            Image,
-            topic_realsense_base + topic_depth,
-            self.depth_callback,
-            10
-        )
-        
-        self.image_publisher = self.create_publisher(
-            Image,
-            image_topic_pub,
-            10
-        )
-        
-        self.bounding_box_publisher = self.create_publisher(
-            BoundingBoxes,
-            topic_bounding_box,
-            10
-        )
-        
-        self.bounding_box_subscriber = self.create_subscription(
-            BoundingBoxes,
-            topic_bounding_box,
-            self.calculate_bounding_box3d,
-            10
-        )
-        
-        self.markers_publisher = self.create_publisher(
-            MarkerArray,
-            '/yolo/detect/markers',
-            10
-        )
+        self.bounding_box_publisher = self.create_publisher(BoundingBoxes,self.topic_yolo_bbox, 10)
 
         self.color_image    = None
-        self.depth_image    = None
         self.boxes          = None
-        self.marker_array   = MarkerArray()
-
+        
     def color_callback(self, msg):
         """Callback to process the color image"""
         try:
@@ -92,17 +69,10 @@ class RealSenseSegmentation(Node):
         except Exception as e:
             self.get_logger().error(f"Error in color image callback: {e}")
 
-    def depth_callback(self, msg):
-        """Callback to process the depth image"""
-        try:
-            self.depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        except Exception as e:
-            self.get_logger().error(f"Error in depth image callback: {e}")
-
     def detect_obstacles(self):
         """Detect obstacles, calculate distances, and visualize segmentations."""
-        if self.color_image is None or self.depth_image is None:
-            self.get_logger().error("No valid color or depth image received.")
+        if self.color_image is None:
+            self.get_logger().error("No valid color image received.")
             return
 
         try:
@@ -123,18 +93,13 @@ class RealSenseSegmentation(Node):
                 masks = result.masks.data.cpu().numpy() if result.masks else []
 
                 for box, conf, cls, mask in zip(boxes, confidences, classes, masks):
-                    leftmost, rightmost, topmost, bottommost = self.get_mask_boundaries(mask)
+                    if not self.model.names[int(cls)] in self.interested_classes or not conf > self.minimal_confidence:
+                        continue
                     
-                    center_x = (leftmost.x + rightmost.x) // 2
-                    center_y = (topmost.y + bottommost.y) // 2
-
+                    leftmost, rightmost, topmost, bottommost, center_x, center_y = self.get_mask_boundaries(mask)
+                    
                     # Annotate segmentation on the color image
                     self.mask_objects(mask)
-
-                    # Get depth value at the center
-                    distance = None
-                    if 0 <= center_x < self.depth_image.shape[1] and 0 <= center_y < self.depth_image.shape[0]:
-                        distance = self.depth_image[center_y, center_x] / 1000.0  # Convert mm to meters
                         
                     cv2.circle(self.color_image, (leftmost.x, leftmost.y), 5, (0, 0, 255), 2)
                     cv2.circle(self.color_image, (rightmost.x, rightmost.y), 5, (0, 0, 255), 2)
@@ -144,14 +109,17 @@ class RealSenseSegmentation(Node):
                     # Draw bounding box and annotations
                     label = f"{self.model.names[int(cls)]} {conf:.2f}"
                     cv2.putText(self.color_image, label, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    if distance is not None:
-                        cv2.putText(self.color_image, f"{distance:.2f} m", (center_x, center_y - 10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
                     # Create a BoundingBox object
-                    detected_box = BoundingBox()
-                    detected_box.center_dist = distance
-                    detected_box.class_label = self.model.names[int(cls)]
+                    detected_box                = BoundingBox()
+                    detected_box.leftmost       = [int(value) for value in leftmost]
+                    detected_box.rightmost      = [int(value) for value in rightmost]
+                    detected_box.topmost        = [int(value) for value in topmost]
+                    detected_box.bottommost     = [int(value) for value in bottommost]
+                    detected_box.center_x       = int(center_x)
+                    detected_box.center_y       = int(center_y)
+                    detected_box.confidence     = conf / 1.0
+                    detected_box.class_label    = self.model.names[int(cls)]
                     bounding_boxes_list.append(detected_box)
 
                 # Publish bounding boxes
@@ -164,43 +132,6 @@ class RealSenseSegmentation(Node):
 
         except Exception as e:
             self.get_logger().error(f"Error in obstacle detection: {e}")
-
-        
-    def calculate_bounding_box3d(self, bounding_boxes_msg):
-        for idx, bbox in enumerate(bounding_boxes_msg.boxes):
-            marker = Marker()
-            marker.header.frame_id = 'camera_link'  # The reference frame for the marker (can be set to 'base_link', 'map', etc.)
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = "spheres"
-            marker.type = Marker.SPHERE  # Marker type: SPHERE
-            marker.action = Marker.ADD  # Action to add the marker
-
-            
-            # Set the position of the sphere
-            centerX = (bbox.x1y1 + bbox.x2y1) / 2
-            centerY = (bbox.x1y1 + bbox.x1y2) / 2
-            
-            marker.pose.position = Point(x=centerX, y=centerY, z=1.0)  # Change as needed
-            marker.pose.orientation.w = 1.0  # No rotation
-
-            # Set the scale of the sphere
-            
-            if bbox.class_label == "person":
-                marker.scale.x = 1.0  # Radius in the X direction (diameter = 2*radius)
-                marker.scale.y = 1.0  # Radius in the Y direction
-                marker.scale.z = 1.0  # Radius in the Z direction
-                marker.color = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)  # Red sphere with full opacity
-                marker.id = 2 # Unique ID for the marker
-
-                # Add the marker to the MarkerArray
-                self.marker_array.markers.append(marker)
-
-        self.publish_markers()
-
-    
-    def publish_markers(self):        
-        self.markers_publisher.publish(self.marker_array)
-        self.marker_array = MarkerArray()
 
 
     def mask_objects(self, mask):
@@ -237,13 +168,28 @@ class RealSenseSegmentation(Node):
         topmost_y = y_indices.min()
         bottommost_y = y_indices.max()
         
-        # if not self.model.names[int(cls)] == "person":
         leftmost:Point2D    = Point2D(leftmost_x, y_indices[x_indices.argmin()])
         rightmost:Point2D   = Point2D(rightmost_x, y_indices[x_indices.argmax()])
         topmost:Point2D     = Point2D(x_indices[y_indices.argmin()], topmost_y)
         bottommost:Point2D  = Point2D(x_indices[y_indices.argmax()], bottommost_y)
         
-        return leftmost, rightmost, topmost, bottommost
+        mask_pixels = cv2.findNonZero(mask.astype(np.uint8))  # Find all non-zero (True) pixels in the mask
+        if mask_pixels is not None:
+            moments = cv2.moments(mask.astype(np.uint8))  # Compute moments of the mask
+            if moments["m00"] != 0:  # Ensure non-zero area
+                center_x = int(moments["m10"] / moments["m00"])
+                center_y = int(moments["m01"] / moments["m00"])
+            else:
+                # Fallback in case mask area is zero
+                center_x = (leftmost.x + rightmost.x) // 2
+                center_y = (topmost.y + bottommost.y) // 2
+        else:
+            # Fallback for an empty mask
+            center_x = (leftmost.x + rightmost.x) // 2
+            center_y = (topmost.y + bottommost.y) // 2
+
+        
+        return leftmost, rightmost, topmost, bottommost, center_x, center_y
         
 
 def main(args=None):

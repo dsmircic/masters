@@ -1,190 +1,146 @@
 import rclpy
-from rclpy.node import Node
-from tf2_ros import TransformListener, Buffer
-from sensor_msgs.msg import PointCloud2
-from bbox_custom_interface.msg import BoundingBoxesCustom, BoundingBox3dCustom, BoundingBoxes3dCustom
-from visualization_msgs.msg import Marker, MarkerArray
-import numpy as np
 import sensor_msgs_py.point_cloud2 as pc2
-import tf_transformations as tf_trans
-import tf2_geometry_msgs
+import numpy as np
+from rclpy.node import Node
+from sensor_msgs.msg import PointCloud2, Image
+from cv_bridge import CvBridge
+from robot_interfaces.msg import BoundingBox, BoundingBoxes
+from visualization_msgs.msg import Marker, MarkerArray
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Point
+from std_msgs.msg import ColorRGBA
+
+from sensor_msgs.msg import PointCloud2, PointField
 
 class Darknet3DNode(Node):
     def __init__(self):
-        super().__init__('darknet3d_node')
+        super().__init__('segment3d')
+        self.bridge = CvBridge()
 
         # Parameters
-        self.declare_parameter('darknet_ros_topic', '/darknet_ros/bounding_boxes')
-        self.declare_parameter('output_bbx3d_topic', '/darknet_ros_3d/bounding_boxes')
-        self.declare_parameter('point_cloud_topic', '/camera/depth/color/points')
-        self.declare_parameter('working_frame', 'camera_link')
-        self.declare_parameter('maximum_detection_threshold', 0.3)
-        self.declare_parameter('minimum_probability', 0.3)
-        self.declare_parameter('interested_classes', [])
+        self.declare_parameter('input_topic_bbox',          '/yolo/detect/bounding_box')
+        self.declare_parameter('point_cloud_topic',         '/camera/depth/color/points')
+        self.declare_parameter('output_topic_3d_marker',    '/yolo/detect/markers')
+        self.declare_parameter('input_realsense_depth',     '/camera/depth/image_rect_raw')
+        self.declare_parameter('output_no_go_zones',        '/no/go/zones')
+        
+        self.declare_parameter('working_frame',                 'camera_link')
+        self.declare_parameter('maximum_detection_threshold',    0.3)
+        self.declare_parameter('minimum_probability',            0.3)
+        self.declare_parameter('interested_classes',            ['person', 'dog', 'clock', 'laptop'])
 
-        self.pointcloud_topic = self.get_parameter('point_cloud_topic').value
-        self.bounding_boxes_topic = self.get_parameter('darknet_ros_topic').value
-        self.output_bbx3d_topic = self.get_parameter('output_bbx3d_topic').value
-        self.working_frame = self.get_parameter('working_frame').value
-        self.max_detection_threshold = self.get_parameter('maximum_detection_threshold').value
-        self.min_probability = self.get_parameter('minimum_probability').value
-        self.interested_classes = self.get_parameter('interested_classes').value
+        self.pointcloud_topic           = self.get_parameter('point_cloud_topic').value
+        self.depth_topic                = self.get_parameter('input_realsense_depth').value
+        self.bounding_boxes_topic       = self.get_parameter('input_topic_bbox').value
+        self.output_bbx3d_topic         = self.get_parameter('output_topic_3d_marker').value
+        self.working_frame              = self.get_parameter('working_frame').value
+        self.max_detection_threshold    = self.get_parameter('maximum_detection_threshold').value
+        self.min_probability            = self.get_parameter('minimum_probability').value
+        self.interested_classes         = self.get_parameter('interested_classes').value
+        self.no_go_topic                = self.get_parameter('output_no_go_zones').value
+        
+        self.fx:float = 898.6607
+        self.fy:float = 898.1004
+        self.cx:float = 642.3966
+        self.cy:float = 359.4919
 
         # Subscribers and Publishers
-        self.pointcloud_sub = self.create_subscription(PointCloud2, self.pointcloud_topic, self.pointcloud_callback, 10)
-        self.bounding_boxes_sub = self.create_subscription(BoundingBoxesCustom, self.bounding_boxes_topic, self.bounding_boxes_callback, 10)
-        self.bounding_boxes_pub = self.create_publisher(BoundingBoxes3dCustom, self.output_bbx3d_topic, 10)
-        self.markers_pub = self.create_publisher(MarkerArray, '/darknet_ros_3d/markers', 10)
+        self.pointcloud_sub             = self.create_subscription(PointCloud2,     self.pointcloud_topic,      self.pointcloud_callback,   10)
+        self.depth_subscriber           = self.create_subscription(Image,           self.depth_topic,           self.depth_callback,        10)
+        self.bounding_box_subscriber    = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.calculate_bbox_3d,     10)
+        self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.publish_no_go_zones,   10)
+        
+        self.markers_publisher          = self.create_publisher(MarkerArray, self.output_bbx3d_topic,   10)
+        self.no_go_zone_publisher       = self.create_publisher(PointCloud2, self.no_go_topic,          10)
 
-        # TF Buffer and Listener
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-
-        self.point_cloud = None
-        self.original_bounding_boxes = []
+        self.original_bounding_boxes    = []
+        self.depth_image                = None
+        self.marker_array               = MarkerArray()
 
     def pointcloud_callback(self, msg):
         self.point_cloud = msg
+        
+    def depth_callback(self, msg):
+        """Callback to process the depth image"""
+        try:
+            self.depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        except Exception as e:
+            self.get_logger().error(f"Error in depth image callback: {e}")
+
 
     def bounding_boxes_callback(self, msg):
         self.original_bounding_boxes = msg.bounding_boxes
         self.process_bounding_boxes()
+        
 
-    def process_bounding_boxes(self):
-        if not self.point_cloud or not self.original_bounding_boxes:
-            return
-
-        try:
-            # Get transform to working frame
-            transform = self.tf_buffer.lookup_transform(
-                self.working_frame, 
-                self.point_cloud.header.frame_id, 
-                rclpy.time.Time())
-            transformed_cloud = self.transform_point_cloud(self.point_cloud, transform)
-        except Exception as e:
-            self.get_logger().error(f"Transform failed: {str(e)}")
-            return
-
-        cloud_points = self.pointcloud_to_array(transformed_cloud)
-        bounding_boxes_msg = BoundingBoxes3dCustom()
-        bounding_boxes_msg.header = transformed_cloud.header
-
-        for bbox in self.original_bounding_boxes:
-            if bbox.probability < self.min_probability:
-                continue
-
-            # Calculate 3D bounding box
-            box = self.calculate_3d_bounding_box(cloud_points, bbox)
-            if box:
-                bounding_boxes_msg.bounding_boxes.append(box)
-
-        self.bounding_boxes_pub.publish(bounding_boxes_msg)
-        self.publish_markers(bounding_boxes_msg)
-
-    def transform_point_cloud(self, pointcloud, transform):
-        # Extract translation and rotation
-        translation = transform.transform.translation
-        rotation = transform.transform.rotation
-
-        # Build transformation matrix
-        translation_matrix = tf_trans.translation_matrix([translation.x, translation.y, translation.z])
-        rotation_matrix = tf_trans.quaternion_matrix([rotation.x, rotation.y, rotation.z, rotation.w])
-        transform_matrix = np.dot(translation_matrix, rotation_matrix)
-
-        # Read points as a NumPy array
-        points = np.array(list(pc2.read_points(pointcloud, skip_nans=True)))
-
-        # Separate x, y, z and other fields
-        xyz = points[:, :3]
-        extra_fields = points[:, 3:] if points.shape[1] > 3 else None
-
-        # Add homogeneous coordinate to xyz
-        xyz_homogeneous = np.hstack((xyz, np.ones((xyz.shape[0], 1))))
-
-        # Transform all points in one matrix multiplication
-        transformed_xyz_homogeneous = xyz_homogeneous @ transform_matrix.T
-
-        # Drop homogeneous coordinate
-        transformed_xyz = transformed_xyz_homogeneous[:, :3]
-
-        # Combine transformed xyz with extra fields (if any)
-        if extra_fields is not None:
-            transformed_points = np.hstack((transformed_xyz, extra_fields))
-        else:
-            transformed_points = transformed_xyz
-
-        # Create new PointCloud2 message
-        fields = pointcloud.fields  # Retain all fields
-        transformed_cloud = pc2.create_cloud(pointcloud.header, fields, transformed_points)
-
-        return transformed_cloud
-
-
-    def calculate_3d_bounding_box(self, cloud_points, bbox):
-        center_x = (bbox.xmin + bbox.xmax) // 2
-        center_y = (bbox.ymin + bbox.ymax) // 2
-        center_idx = center_y * cloud_points.shape[1] + center_x
-
-        if center_idx >= len(cloud_points):
-            return None
-
-        center_point = cloud_points[center_idx]
-        if np.isnan(center_point).any():
-            return None
-
-        # Initialize bounding box dimensions
-        min_coords = np.full(3, np.inf)
-        max_coords = np.full(3, -np.inf)
-
-        for y in range(bbox.ymin, bbox.ymax):
-            for x in range(bbox.xmin, bbox.xmax):
-                idx = y * cloud_points.shape[1] + x
-                point = cloud_points[idx]
-
-                if np.isnan(point).any() or np.linalg.norm(point[:3] - center_point[:3]) > self.max_detection_threshold:
-                    continue
-
-                min_coords = np.minimum(min_coords, point[:3])
-                max_coords = np.maximum(max_coords, point[:3])
-
-        if np.isinf(min_coords).any() or np.isinf(max_coords).any():
-            return None
-
-
-        bounding_box = BoundingBox3dCustom()
-        bounding_box.object_name = bbox.class_id
-        bounding_box.probability = bbox.probability
-        bounding_box.xmin, bounding_box.ymin, bounding_box.zmin = min_coords
-        bounding_box.xmax, bounding_box.ymax, bounding_box.zmax = max_coords
-        print(bounding_box)
-        return bounding_box
-
-    def pointcloud_to_array(self, pointcloud):
-        points = list(pc2.read_points(pointcloud, field_names=("x", "y", "z"), skip_nans=True))
-        return np.array(points)
-
-    def publish_markers(self, bounding_boxes_msg):
-        marker_array = MarkerArray()
-        for idx, bbox in enumerate(bounding_boxes_msg.bounding_boxes):
+    def calculate_bbox_3d(self, bounding_boxes_msg):
+        for idx, bbox in enumerate(bounding_boxes_msg.boxes):
             marker = Marker()
-            marker.header = bounding_boxes_msg.header
-            marker.ns = 'darknet3d'
-            marker.id = idx
-            marker.type = Marker.CUBE
-            marker.action = Marker.ADD
-            marker.pose.position.x = (bbox.xmax + bbox.xmin) / 2.0
-            marker.pose.position.y = (bbox.ymax + bbox.ymin) / 2.0
-            marker.pose.position.z = (bbox.zmax + bbox.zmin) / 2.0
-            marker.scale.x = bbox.xmax - bbox.xmin
-            marker.scale.y = bbox.ymax - bbox.ymin
-            marker.scale.z = bbox.zmax - bbox.zmin
-            marker.color.a = 0.4
-            marker.color.r = (1.0 - bbox.probability) * 255.0
-            marker.color.g = bbox.probability * 255.0
-            marker.color.b = 0.0
-            marker_array.markers.append(marker)
+            marker.header.frame_id = 'camera_link'  # The reference frame for the marker (can be set to 'base_link', 'map', etc.)
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "spheres"
+            marker.type = Marker.SPHERE  # Marker type: SPHERE
+            marker.action = Marker.ADD  # Action to add the marker
+            
+            depth_value = self.depth_image[bbox.center_y, bbox.center_x] / 1000.0  # Convert mm to meters (if ne
+            
+            # Convert 2D pixel coordinates to 3D coordinates
+            x = round((bbox.center_x - self.cx) * depth_value / self.fx, 3)
+            y = round((bbox.center_y - self.cy) * depth_value / self.fy, 3)
+            z = round(depth_value, 3)
+            
+            marker.pose.position = Point(x=z, y=x, z=1.0)  # Change as needed
+            marker.pose.orientation.w = 1.0  # No rotation
 
-        self.markers_pub.publish(marker_array)
+            # Set the scale of the sphere
+            
+            if bbox.class_label in self.interested_classes and bbox.confidence > self.min_probability:
+                print(f"X: {x}, Y: {y}, Z: {z}")
+                marker.scale.x = 1.0  # Radius in the X direction (diameter = 2*radius)
+                marker.scale.y = 1.0  # Radius in the Y direction
+                marker.scale.z = 1.0  # Radius in the Z direction
+                marker.color = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)  # Red sphere with full opacity
+                marker.id = idx # Unique ID for the marker
+
+                # Add the marker to the MarkerArray
+                self.marker_array.markers.append(marker)
+
+        self.publish_markers()
+        
+
+    def publish_no_go_zones(self, bounding_boxes_msg):
+        point_cloud                 = PointCloud2()
+        point_cloud.header.frame_id = self.working_frame
+        point_cloud.header.stamp    = self.get_clock().now().to_msg()
+        
+        fields = [
+            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+            ]
+
+        points = []
+
+        for bbox in bounding_boxes_msg.boxes:
+            depth_value = self.depth_image[bbox.center_y, bbox.center_x] / 1000.0
+            x = (bbox.center_x - self.cx) * depth_value / self.fx
+            y = (bbox.center_y - self.cy) * depth_value / self.fy
+            z = depth_value
+            
+            if bbox.class_label in self.interested_classes and bbox.confidence > self.min_probability:
+                # Generate no-go zone points (e.g., around the detected person)
+                for dx in [-0.5, 0.5]:
+                    for dy in [-0.5, 0.5]:
+                        points.append((x + dx, y + dy, z))
+
+        point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
+        self.no_go_zone_publisher.publish(point_cloud)
+
+    
+    def publish_markers(self):        
+        self.markers_publisher.publish(self.marker_array)
+        self.marker_array = MarkerArray()
+
 
 def main(args=None):
     rclpy.init(args=args)

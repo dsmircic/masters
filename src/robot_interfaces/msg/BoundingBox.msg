@@ -1,7 +1,8 @@
-float32     x1y1
-float32     x1y2
-float32     x2y1
-float32     x2y2
-float32     center_dist
-float32     confidence
-string      class_label
+int32[2]     leftmost
+int32[2]     rightmost
+int32[2]     topmost
+int32[2]     bottommost
+int32        center_x
+int32        center_y
+float32      confidence
+string       class_label
