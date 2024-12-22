@@ -1,7 +1,7 @@
-int32   x_min
-int32   x_max
-int32   y_min
-int32   y_max
-float32 distance
-float32 confidence
-string  class_label
+float32     x1y1
+float32     x1y2
+float32     x2y1
+float32     x2y2
+float32     center_dist
+float32     confidence
+string      class_label
