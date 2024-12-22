@@ -23,6 +23,14 @@ safety_margin = 30
 
 timer_period = 0.5
 
+class Point2D():
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+    
+    def __repr__(self):
+        return f"({self.x}, {self.y})"
+
 class RealSenseSegmentation(Node):
     def __init__(self):
         super().__init__('realsense_segmentation')
@@ -117,8 +125,8 @@ class RealSenseSegmentation(Node):
                 for box, conf, cls, mask in zip(boxes, confidences, classes, masks):
                     leftmost, rightmost, topmost, bottommost = self.get_mask_boundaries(mask)
                     
-                    center_x = (leftmost[0] + rightmost[0]) // 2
-                    center_y = (topmost[1] + bottommost[1]) // 2
+                    center_x = (leftmost.x + rightmost.x) // 2
+                    center_y = (topmost.y + bottommost.y) // 2
 
                     # Annotate segmentation on the color image
                     self.mask_objects(mask)
@@ -128,17 +136,17 @@ class RealSenseSegmentation(Node):
                     if 0 <= center_x < self.depth_image.shape[1] and 0 <= center_y < self.depth_image.shape[0]:
                         distance = self.depth_image[center_y, center_x] / 1000.0  # Convert mm to meters
                         
-                    cv2.circle(self.color_image, (leftmost), 5, (0, 0, 255), 2)
-                    cv2.circle(self.color_image, (rightmost), 5, (0, 0, 255), 2)
-                    cv2.circle(self.color_image, (bottommost), 5, (0, 0, 255), 2)
-                    cv2.circle(self.color_image, (topmost), 5, (0, 0, 255), 2)
+                    cv2.circle(self.color_image, (leftmost.x, leftmost.y), 5, (0, 0, 255), 2)
+                    cv2.circle(self.color_image, (rightmost.x, rightmost.y), 5, (0, 0, 255), 2)
+                    cv2.circle(self.color_image, (bottommost.x, bottommost.y), 5, (0, 0, 255), 2)
+                    cv2.circle(self.color_image, (topmost.x, topmost.y), 5, (0, 0, 255), 2)
 
                     # Draw bounding box and annotations
                     label = f"{self.model.names[int(cls)]} {conf:.2f}"
-                    cv2.putText(self.color_image, label, (center_x, center_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    # if distance is not None:
-                    #     cv2.putText(self.color_image, f"{distance:.2f} m", (), 
-                    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                    cv2.putText(self.color_image, label, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    if distance is not None:
+                        cv2.putText(self.color_image, f"{distance:.2f} m", (center_x, center_y - 10), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
                     # Create a BoundingBox object
                     detected_box = BoundingBox()
@@ -214,7 +222,7 @@ class RealSenseSegmentation(Node):
         
         self.color_image = cv2.addWeighted(self.color_image, 1.0, colored_mask, 0.5, 0)
         
-    def get_mask_boundaries(self, mask):
+    def get_mask_boundaries(self, mask) -> Point2D:
         if mask.shape[:2] != self.color_image.shape[:2]:
             mask = cv2.resize(mask, (self.color_image.shape[1], self.color_image.shape[0]), interpolation=cv2.INTER_NEAREST)
 
@@ -230,10 +238,10 @@ class RealSenseSegmentation(Node):
         bottommost_y = y_indices.max()
         
         # if not self.model.names[int(cls)] == "person":
-        leftmost    = (leftmost_x, y_indices[x_indices.argmin()])
-        rightmost   = (rightmost_x, y_indices[x_indices.argmax()])
-        topmost     = (x_indices[y_indices.argmin()], topmost_y)
-        bottommost  = (x_indices[y_indices.argmax()], bottommost_y)
+        leftmost:Point2D    = Point2D(leftmost_x, y_indices[x_indices.argmin()])
+        rightmost:Point2D   = Point2D(rightmost_x, y_indices[x_indices.argmax()])
+        topmost:Point2D     = Point2D(x_indices[y_indices.argmin()], topmost_y)
+        bottommost:Point2D  = Point2D(x_indices[y_indices.argmax()], bottommost_y)
         
         return leftmost, rightmost, topmost, bottommost
         
