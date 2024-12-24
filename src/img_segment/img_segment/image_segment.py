@@ -56,7 +56,7 @@ class RealSenseSegmentation(Node):
         # Subscribe to the color and depth image topics
         self.color_subscriber = self.create_subscription(Image, self.topic_realsense_img, self.color_callback, 10)
         
-        self.bounding_box_publisher = self.create_publisher(BoundingBoxes,self.topic_yolo_bbox, 10)
+        self.bounding_box_publisher = self.create_publisher(BoundingBoxes, self.topic_yolo_bbox, 10)
 
         self.color_image    = None
         self.boxes          = None
@@ -93,8 +93,6 @@ class RealSenseSegmentation(Node):
                 masks = result.masks.data.cpu().numpy() if result.masks else []
 
                 for box, conf, cls, mask in zip(boxes, confidences, classes, masks):
-                    if not self.model.names[int(cls)] in self.interested_classes or not conf > self.minimal_confidence:
-                        continue
                     
                     leftmost, rightmost, topmost, bottommost, center_x, center_y = self.get_mask_boundaries(mask)
                     
