@@ -23,9 +23,6 @@ class Segment3D(Node):
 
         # Parameters
         self.declare_parameter('input_topic_bbox',              '/yolo/detect/bounding_box')
-        self.declare_parameter('point_cloud_topic',             '/camera/depth/color/points')
-        self.declare_parameter('output_topic_3d_marker',        '/yolo/detect/markers')
-        self.declare_parameter('input_realsense_depth',         '/camera/depth/image_rect_raw')
         self.declare_parameter('output_no_go_zones',            '/no/go/zones')
         
         self.declare_parameter('working_frame',                 'camera_link')
@@ -36,10 +33,7 @@ class Segment3D(Node):
         self.declare_parameter('cube_step',                      0.1)
         self.declare_parameter('qos',                            10)
         
-
-        self.depth_topic                                        = self.get_parameter('input_realsense_depth').value
         self.bounding_boxes_topic                               = self.get_parameter('input_topic_bbox').value
-        self.output_bbx3d_topic                                 = self.get_parameter('output_topic_3d_marker').value
         self.working_frame                                      = self.get_parameter('working_frame').value
         self.max_detection_threshold                            = self.get_parameter('maximum_detection_threshold').value
         self.min_probability                                    = self.get_parameter('minimum_probability').value
@@ -55,10 +49,8 @@ class Segment3D(Node):
         self.cy:float = 359.4919
 
         # Subscribers and Publishers
-        self.depth_subscriber           = self.create_subscription(Image,           self.depth_topic,           self.depth_callback,        self.qos)
         self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
         
-        self.markers_publisher          = self.create_publisher(MarkerArray, self.output_bbx3d_topic,   self.qos)
         self.no_go_zone_publisher       = self.create_publisher(PointCloud2, self.no_go_topic,          self.qos)
 
         self.original_bounding_boxes    = []
@@ -85,27 +77,30 @@ class Segment3D(Node):
             objectClass                 = GetObject().createObject(bbox.class_label)
             
             if bbox.class_label not in self.interested_classes or bbox.confidence < self.min_probability or objectClass == None:
+                print(objectClass)
                 continue
             
-            objectDepth: float          = objectClass.get_depth()
-            depth_value                 = bbox.depth
+            object_radius: float    = objectClass.get_depth()
+            measured_distance       = bbox.depth
             
-            leftmost_x      = (bbox.leftmost[0] - self.cx) * depth_value / self.fx
-            rightmost_x     = (bbox.rightmost[0] - self.cx) * depth_value / self.fx
-            leftmost_y      = (bbox.leftmost[1] - self.cy) * depth_value / self.fy
-            rightmost_y     = (bbox.leftmost[1] - self.cy) * depth_value / self.fy
+            leftmost_x      = (bbox.leftmost[0]     - self.cx) * measured_distance / self.fx
+            rightmost_x     = (bbox.rightmost[0]    - self.cx) * measured_distance / self.fx
+            topmost_y       = (bbox.topmost[1]      - self.cy) * measured_distance / self.fy
+            bottommost_y    = (bbox.bottommost[1]   - self.cy) * measured_distance / self.fy
             
-            x = (bbox.center_x - self.cx) * depth_value / self.fx
-            y = (bbox.center_y - self.cy) * depth_value / self.fy
-            z = depth_value
+            x = (bbox.center_x - self.cx) * measured_distance / self.fx
+            y = (bbox.center_y - self.cy) * measured_distance / self.fy
+            z = measured_distance
             
-            y = -x
-            x = depth_value
+            # x = x
+            # y = -depth_value
+            # z = -y
             
-            for dx in np.arange(-leftmost_x, (rightmost_x + self.object_radius), self.cube_step):
-                for dy in np.arange(-rightmost_y, (leftmost_y + self.object_radius), self.cube_step):
-                    for dz in np.arange(-(objectDepth), (objectDepth + self.object_radius), self.cube_step):
-                        points.append((x + dx, y + dy, z + dz))
+            for dx in np.arange(leftmost_x, (rightmost_x + self.object_radius), self.cube_step):
+                for dy in np.arange(bottommost_y, (topmost_y + self.object_radius), self.cube_step):
+                    for dz in np.arange((measured_distance), (measured_distance + self.object_radius), self.cube_step):
+                        points.append((dx, dy, dz))
+                        print(f"dx: {dx}\ndy: {dy}\ndz: {dz}\n")
 
             point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
             self.no_go_zone_publisher.publish(point_cloud)
