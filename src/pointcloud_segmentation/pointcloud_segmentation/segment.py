@@ -56,66 +56,13 @@ class Segment3D(Node):
 
         # Subscribers and Publishers
         self.depth_subscriber           = self.create_subscription(Image,           self.depth_topic,           self.depth_callback,        self.qos)
-        # self.bounding_box_subscriber    = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.calculate_bbox_3d,     self.qos)
         self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
         
         self.markers_publisher          = self.create_publisher(MarkerArray, self.output_bbx3d_topic,   self.qos)
         self.no_go_zone_publisher       = self.create_publisher(PointCloud2, self.no_go_topic,          self.qos)
 
         self.original_bounding_boxes    = []
-        self.depth_image                = None
         self.marker_array               = MarkerArray()
-
-
-    def depth_callback(self, msg):
-        """Callback to process the depth image"""
-        try:
-            self.depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        except Exception as e:
-            self.get_logger().error(f"Error in depth image callback: {e}")
-        
-
-    def calculate_bbox_3d(self, bounding_boxes_msg):
-        """Calculates 3D bounding boxes using Realsense camera's intrinsic parameters and the object's coordinates in 2D.
-            bounding_boxes_msg: BoundingBox.msg
-                message from topic /yolo/detect/bounding_boxes
-        """
-        for idx, bbox in enumerate(bounding_boxes_msg.boxes):
-            marker = Marker()
-            marker.header.frame_id = 'camera_link'  # The reference frame for the marker (can be set to 'base_link', 'map', etc.)
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = "spheres"
-            marker.type = Marker.SPHERE  # Marker type: SPHERE
-            marker.action = Marker.ADD  # Action to add the marker
-            
-            depth_value = self.depth_image[bbox.center_y, bbox.center_x] / 1000.0  # Convert mm to meters (if ne
-            
-            # Convert 2D pixel coordinates to 3D coordinates
-            x = round((bbox.center_x - self.cx) * depth_value / self.fx, 3)
-            y = round((bbox.center_y - self.cy) * depth_value / self.fy, 3)
-            z = round(depth_value, 3)
-            
-            x = depth_value
-            y = -x
-            
-            marker.pose.position = Point(x=x, y=y, z=z)  # Change as needed
-            marker.pose.orientation.w = 1.0  # No rotation
-
-            # Set the scale of the sphere
-            
-            if bbox.class_label in self.interested_classes and bbox.confidence > self.min_probability:
-                print(f"X: {x}, Y: {y}, Z: {z}")
-                marker.scale.x = 1.0  # Radius in the X direction (diameter = 2*radius)
-                marker.scale.y = 1.0  # Radius in the Y direction
-                marker.scale.z = 1.0  # Radius in the Z direction
-                marker.color = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)  # Red sphere with full opacity
-                marker.id = idx # Unique ID for the marker
-
-                # Add the marker to the MarkerArray
-                self.marker_array.markers.append(marker)
-
-        self.publish_markers()
-        
 
     def publish_no_go_zones(self, bounding_boxes_msg):
         """Creates a pointcloud of no-go areas for the mobile robot.
@@ -135,9 +82,6 @@ class Segment3D(Node):
         points = []
 
         for bbox in bounding_boxes_msg.boxes:
-            if self.depth_image is None:
-                continue
-            
             objectClass                 = GetObject().createObject(bbox.class_label)
             
             if bbox.class_label not in self.interested_classes or bbox.confidence < self.min_probability or objectClass == None:
