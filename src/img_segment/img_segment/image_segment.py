@@ -40,12 +40,14 @@ class RealSenseSegmentation(Node):
 
         # Load YOLO model
         self.model = YOLO('yolov8n-seg.pt', verbose=False)
+        for name in self.model.names:
+            print(self.model.names[name])
         
         self.declare_parameter('input_realsense_img',   '/camera/color/image_raw')
         self.declare_parameter('input_realsense_depth', '/camera/depth/image_rect_raw')
         self.declare_parameter('output_bbox_topic',     '/yolo/detect/bounding_box')
+        self.declare_parameter('interested_classes',    ['person', 'dog', 'clock', 'tv', 'laptop', 'bottle', 'umbrella'])
         self.declare_parameter('minimal_confidence',     0.4)
-        self.declare_parameter('interested_classes',    ['person', 'dog', 'clock', 'tv', 'laptop'])
         
         self.topic_realsense_img        = self.get_parameter('input_realsense_img').value
         self.topic_realsense_depth      = self.get_parameter('input_realsense_depth').value
@@ -54,7 +56,8 @@ class RealSenseSegmentation(Node):
         self.minimal_confidence         = self.get_parameter('minimal_confidence').value
         
         # Subscribe to the color and depth image topics
-        self.color_subscriber = self.create_subscription(Image, self.topic_realsense_img, self.color_callback, 10)
+        self.color_subscriber = self.create_subscription(Image, self.topic_realsense_img,   self.color_callback, 10)
+        self.depth_subscriber = self.create_subscription(Image, self.topic_realsense_depth, self.depth_callback, 10)
         
         self.bounding_box_publisher = self.create_publisher(BoundingBoxes, self.topic_yolo_bbox, 10)
 
@@ -68,6 +71,13 @@ class RealSenseSegmentation(Node):
             self.detect_obstacles()
         except Exception as e:
             self.get_logger().error(f"Error in color image callback: {e}")
+            
+    def depth_callback(self, msg):
+        """Callback to process the depth image"""
+        try:
+            self.depth_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        except Exception as e:
+            self.get_logger().error(f"Error in depth image callback: {e}")
 
     def detect_obstacles(self):
         """Detect obstacles, calculate distances, and visualize segmentations."""
@@ -98,7 +108,7 @@ class RealSenseSegmentation(Node):
                     
                     # Annotate segmentation on the color image
                     self.mask_objects(mask)
-                        
+                    
                     cv2.circle(self.color_image, (leftmost.x, leftmost.y), 5, (0, 0, 255), 2)
                     cv2.circle(self.color_image, (rightmost.x, rightmost.y), 5, (0, 0, 255), 2)
                     cv2.circle(self.color_image, (bottommost.x, bottommost.y), 5, (0, 0, 255), 2)
@@ -107,6 +117,8 @@ class RealSenseSegmentation(Node):
                     # Draw bounding box and annotations
                     label = f"{self.model.names[int(cls)]} {conf:.2f}"
                     cv2.putText(self.color_image, label, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                    depth = self.depth_image[center_y, center_x] / 1000.0
 
                     # Create a BoundingBox object
                     detected_box                = BoundingBox()
@@ -118,6 +130,7 @@ class RealSenseSegmentation(Node):
                     detected_box.center_y       = int(center_y)
                     detected_box.confidence     = conf / 1.0
                     detected_box.class_label    = self.model.names[int(cls)]
+                    detected_box.depth          = depth
                     bounding_boxes_list.append(detected_box)
 
                 # Publish bounding boxes

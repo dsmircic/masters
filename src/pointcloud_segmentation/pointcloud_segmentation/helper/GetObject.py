@@ -1,6 +1,8 @@
-from .AbstractObject import AbstractObject
-from .Person import Person
-from .Dog import Dog
+from .AbstractObject    import AbstractObject
+from .Person            import Person
+from .Dog               import Dog
+from .Bottle            import Bottle
+from .Umbrella          import Umbrella
 
 class GetObject():
         
@@ -9,5 +11,9 @@ class GetObject():
             return Person()
         elif class_name == "dog":
             return Dog()
+        elif class_name == "bottle":
+            return Bottle()
+        elif class_name == "umbrella":
+            return Umbrella()
         else:
             return None

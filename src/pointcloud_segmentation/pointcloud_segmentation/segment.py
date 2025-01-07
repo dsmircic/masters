@@ -29,7 +29,7 @@ class Segment3D(Node):
         self.declare_parameter('output_no_go_zones',            '/no/go/zones')
         
         self.declare_parameter('working_frame',                 'camera_link')
-        self.declare_parameter('interested_classes',            ['person', 'dog', 'clock', 'laptop'])
+        self.declare_parameter('interested_classes',            ['person', 'dog', 'clock', 'laptop', 'bottle', 'umbrella'])
         self.declare_parameter('maximum_detection_threshold',    0.3)
         self.declare_parameter('minimum_probability',            0.3)
         self.declare_parameter('object_radius',                  0.5)
@@ -56,7 +56,7 @@ class Segment3D(Node):
 
         # Subscribers and Publishers
         self.depth_subscriber           = self.create_subscription(Image,           self.depth_topic,           self.depth_callback,        self.qos)
-        self.bounding_box_subscriber    = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.calculate_bbox_3d,     self.qos)
+        # self.bounding_box_subscriber    = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.calculate_bbox_3d,     self.qos)
         self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
         
         self.markers_publisher          = self.create_publisher(MarkerArray, self.output_bbx3d_topic,   self.qos)
@@ -94,6 +94,9 @@ class Segment3D(Node):
             x = round((bbox.center_x - self.cx) * depth_value / self.fx, 3)
             y = round((bbox.center_y - self.cy) * depth_value / self.fy, 3)
             z = round(depth_value, 3)
+            
+            x = depth_value
+            y = -x
             
             marker.pose.position = Point(x=x, y=y, z=z)  # Change as needed
             marker.pose.orientation.w = 1.0  # No rotation
@@ -141,7 +144,7 @@ class Segment3D(Node):
                 continue
             
             objectDepth: float          = objectClass.get_depth()
-            depth_value                 = self.depth_image[bbox.center_y, bbox.center_x] / 1000.0
+            depth_value                 = bbox.depth
             
             leftmost_x      = (bbox.leftmost[0] - self.cx) * depth_value / self.fx
             rightmost_x     = (bbox.rightmost[0] - self.cx) * depth_value / self.fx
@@ -152,13 +155,16 @@ class Segment3D(Node):
             y = (bbox.center_y - self.cy) * depth_value / self.fy
             z = depth_value
             
-            for dx in np.arange(-leftmost_x, rightmost_x + self.object_radius, self.cube_step):
-                for dy in np.arange(-leftmost_y, rightmost_y + self.object_radius, self.cube_step):
-                    for dz in np.arange(-objectDepth, objectDepth + self.object_radius, self.cube_step):
+            y = -x
+            x = depth_value
+            
+            for dx in np.arange(-leftmost_x, (rightmost_x + self.object_radius), self.cube_step):
+                for dy in np.arange(-rightmost_y, (leftmost_y + self.object_radius), self.cube_step):
+                    for dz in np.arange(-(objectDepth), (objectDepth + self.object_radius), self.cube_step):
                         points.append((x + dx, y + dy, z + dz))
 
-        point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
-        self.no_go_zone_publisher.publish(point_cloud)
+            point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
+            self.no_go_zone_publisher.publish(point_cloud)
     
     def publish_markers(self):        
         self.markers_publisher.publish(self.marker_array)

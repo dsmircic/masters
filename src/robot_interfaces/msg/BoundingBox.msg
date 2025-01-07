@@ -4,5 +4,6 @@ int32[2]     topmost
 int32[2]     bottommost
 int32        center_x
 int32        center_y
+float32      depth
 float32      confidence
 string       class_label
