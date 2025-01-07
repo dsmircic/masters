@@ -138,8 +138,8 @@ class RealSenseSegmentation(Node):
                 self.bounding_box_publisher.publish(self.boxes)
 
                 # Display the image with segmentations
-                cv2.imshow("YOLO Segmentation and Distances", self.color_image)
-                cv2.waitKey(1)
+                # cv2.imshow("YOLO Segmentation and Distances", self.color_image)
+                # cv2.waitKey(1)
 
         except Exception as e:
             self.get_logger().error(f"Error in obstacle detection: {e}")
