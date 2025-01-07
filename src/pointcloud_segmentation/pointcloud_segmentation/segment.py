@@ -77,7 +77,6 @@ class Segment3D(Node):
             objectClass                 = GetObject().createObject(bbox.class_label)
             
             if bbox.class_label not in self.interested_classes or bbox.confidence < self.min_probability or objectClass == None:
-                print(objectClass)
                 continue
             
             object_radius: float    = objectClass.get_depth()
@@ -88,18 +87,14 @@ class Segment3D(Node):
             topmost_y       = (bbox.topmost[1]      - self.cy) * measured_distance / self.fy
             bottommost_y    = (bbox.bottommost[1]   - self.cy) * measured_distance / self.fy
             
-            x = (bbox.center_x - self.cx) * measured_distance / self.fx
-            y = (bbox.center_y - self.cy) * measured_distance / self.fy
-            z = measured_distance
-            
-            # x = x
-            # y = -depth_value
-            # z = -y
-            
-            for dx in np.arange(leftmost_x, (rightmost_x + self.object_radius), self.cube_step):
-                for dy in np.arange(bottommost_y, (topmost_y + self.object_radius), self.cube_step):
-                    for dz in np.arange((measured_distance), (measured_distance + self.object_radius), self.cube_step):
-                        points.append((dx, dy, dz))
+            # x = (bbox.center_x - self.cx) * measured_distance / self.fx
+            # y = (bbox.center_y - self.cy) * measured_distance / self.fy
+            # z = measured_distance
+
+            for dx in np.arange(leftmost_x, (rightmost_x), self.cube_step):
+                for dy in np.arange(topmost_y, (bottommost_y), self.cube_step):
+                    for dz in np.arange((measured_distance), (measured_distance + object_radius), self.cube_step):
+                        points.append((dz, -dx, -dy))
                         print(f"dx: {dx}\ndy: {dy}\ndz: {dz}\n")
 
             point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
