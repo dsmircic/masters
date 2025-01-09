@@ -5,4 +5,4 @@ class Umbrella(AbstractObject):
         super().__init__()
         
     def get_depth(self):
-        return 0.8
+        return 0.2

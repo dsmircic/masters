@@ -43,10 +43,10 @@ class RealSenseSegmentation(Node):
         for name in self.model.names:
             print(self.model.names[name])
         
-        self.declare_parameter('input_realsense_img',   '/camera/color/image_raw')
-        self.declare_parameter('input_realsense_depth', '/camera/depth/image_rect_raw')
+        self.declare_parameter('input_realsense_img',   '/camera/camera/color/image_raw')
+        self.declare_parameter('input_realsense_depth', '/camera/camera/depth/image_rect_raw')
         self.declare_parameter('output_bbox_topic',     '/yolo/detect/bounding_box')
-        self.declare_parameter('interested_classes',    ['person', 'dog', 'clock', 'tv', 'laptop', 'bottle', 'umbrella'])
+        self.declare_parameter('interested_classes',    ['person', 'dog', 'clock', 'tv', 'laptop', 'bottle', 'umbrella', 'chair'])
         self.declare_parameter('minimal_confidence',     0.4)
         
         self.topic_realsense_img        = self.get_parameter('input_realsense_img').value

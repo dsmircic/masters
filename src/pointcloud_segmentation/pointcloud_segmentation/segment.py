@@ -26,7 +26,7 @@ class Segment3D(Node):
         self.declare_parameter('output_no_go_zones',            '/no/go/zones')
         
         self.declare_parameter('working_frame',                 'camera_link')
-        self.declare_parameter('interested_classes',            ['person', 'dog', 'clock', 'laptop', 'bottle', 'umbrella'])
+        self.declare_parameter('interested_classes',            ['person', 'dog', 'clock', 'laptop', 'bottle', 'umbrella', 'chair'])
         self.declare_parameter('maximum_detection_threshold',    0.3)
         self.declare_parameter('minimum_probability',            0.3)
         self.declare_parameter('object_radius',                  0.5)
@@ -86,16 +86,12 @@ class Segment3D(Node):
             rightmost_x     = (bbox.rightmost[0]    - self.cx) * measured_distance / self.fx
             topmost_y       = (bbox.topmost[1]      - self.cy) * measured_distance / self.fy
             bottommost_y    = (bbox.bottommost[1]   - self.cy) * measured_distance / self.fy
-            
-            # x = (bbox.center_x - self.cx) * measured_distance / self.fx
-            # y = (bbox.center_y - self.cy) * measured_distance / self.fy
-            # z = measured_distance
 
             for dx in np.arange(leftmost_x, (rightmost_x), self.cube_step):
                 for dy in np.arange(topmost_y, (bottommost_y), self.cube_step):
                     for dz in np.arange((measured_distance), (measured_distance + object_radius), self.cube_step):
                         points.append((dz, -dx, -dy))
-                        print(f"dx: {dx}\ndy: {dy}\ndz: {dz}\n")
+                        # print(f"dx: {dx}\ndy: {dy}\ndz: {dz}\n")
 
             point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
             self.no_go_zone_publisher.publish(point_cloud)

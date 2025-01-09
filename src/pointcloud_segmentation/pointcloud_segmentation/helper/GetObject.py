@@ -3,6 +3,7 @@ from .Person            import Person
 from .Dog               import Dog
 from .Bottle            import Bottle
 from .Umbrella          import Umbrella
+from .Chair             import Chair
 
 class GetObject():
         
@@ -15,5 +16,7 @@ class GetObject():
             return Bottle()
         elif class_name == "umbrella":
             return Umbrella()
+        elif class_name == "chair":
+            return Chair()
         else:
             return None

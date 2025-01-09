@@ -1,6 +1,6 @@
 from .AbstractObject import AbstractObject
 
-class Dog(AbstractObject):
+class Chair(AbstractObject):
     def __init__(self):
         super().__init__()
         
