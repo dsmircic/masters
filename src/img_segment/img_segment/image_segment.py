@@ -7,19 +7,6 @@ import numpy as np
 from ultralytics import YOLO
 from robot_interfaces.msg import BoundingBox, BoundingBoxes
 
-# https://opencvpython.blogspot.com/2012/06/contours-3-extraction.html segmentation coordinates
-
-topic_realsense_base    = "/camera"
-topic_depth             = "/depth/image_rect_raw"
-topic_image             = "/color/image_raw"
-
-image_topic_pub         = "/yolo/detect/image"
-topic_bounding_box      = "/yolo/detect/bounding_box"
-
-safety_margin = 30
-
-timer_period = 0.5
-
 class Point2D():
     def __init__(self, x: int, y: int):
         self.x = x
@@ -125,10 +112,10 @@ class RealSenseSegmentation(Node):
                     topmost_dist   :float = self.depth_image[topmost.y, topmost.x]        / 1000.0
                     bottommost_dist:float = self.depth_image[bottommost.y, bottommost.x]  / 1000.0
                     
+                    detected_box                = BoundingBox()
                     detected_box.depth = min(leftmost_dist, rightmost_dist, topmost_dist, bottommost_dist)
 
                     # Create a BoundingBox object
-                    detected_box                = BoundingBox()
                     detected_box.leftmost       = [int(value) for value in leftmost]
                     detected_box.rightmost      = [int(value) for value in rightmost]
                     detected_box.topmost        = [int(value) for value in topmost]
