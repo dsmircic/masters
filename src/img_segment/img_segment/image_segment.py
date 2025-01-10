@@ -40,13 +40,11 @@ class RealSenseSegmentation(Node):
 
         # Load YOLO model
         self.model = YOLO('yolov8n-seg.pt', verbose=False)
-        for name in self.model.names:
-            print(self.model.names[name])
         
-        self.declare_parameter('input_realsense_img',   '/camera/camera/color/image_raw')
-        self.declare_parameter('input_realsense_depth', '/camera/camera/depth/image_rect_raw')
+        self.declare_parameter('input_realsense_img',   '/camera/color/image_raw')
+        self.declare_parameter('input_realsense_depth', '/camera/depth/image_rect_raw')
         self.declare_parameter('output_bbox_topic',     '/yolo/detect/bounding_box')
-        self.declare_parameter('interested_classes',    ['person', 'dog', 'clock', 'tv', 'laptop', 'bottle', 'umbrella', 'chair'])
+        self.declare_parameter('interested_classes',    ['person', 'bottle', 'chair'])
         self.declare_parameter('minimal_confidence',     0.4)
         
         self.topic_realsense_img        = self.get_parameter('input_realsense_img').value
@@ -63,6 +61,8 @@ class RealSenseSegmentation(Node):
 
         self.color_image    = None
         self.boxes          = None
+        
+        self.depth_image    = None
         
     def color_callback(self, msg):
         """Callback to process the color image"""
@@ -119,6 +119,13 @@ class RealSenseSegmentation(Node):
                     cv2.putText(self.color_image, label, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
                     depth = self.depth_image[center_y, center_x] / 1000.0
+                    
+                    leftmost_dist  :float = self.depth_image[leftmost.y, leftmost.x]      / 1000.0
+                    rightmost_dist :float = self.depth_image[rightmost.y, rightmost.x]    / 1000.0
+                    topmost_dist   :float = self.depth_image[topmost.y, topmost.x]        / 1000.0
+                    bottommost_dist:float = self.depth_image[bottommost.y, bottommost.x]  / 1000.0
+                    
+                    detected_box.depth = min(leftmost_dist, rightmost_dist, topmost_dist, bottommost_dist)
 
                     # Create a BoundingBox object
                     detected_box                = BoundingBox()
@@ -130,7 +137,6 @@ class RealSenseSegmentation(Node):
                     detected_box.center_y       = int(center_y)
                     detected_box.confidence     = conf / 1.0
                     detected_box.class_label    = self.model.names[int(cls)]
-                    detected_box.depth          = depth
                     bounding_boxes_list.append(detected_box)
 
                 # Publish bounding boxes
