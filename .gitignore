@@ -5,3 +5,4 @@ log/
 pycache/*Obstacle Detection_screenshot_03.12.2024.png
 
 *.png
+.vscode/
