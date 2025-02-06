@@ -31,7 +31,7 @@ class RealSenseSegmentation(Node):
         self.declare_parameter('input_realsense_img',   '/camera/color/image_raw')
         self.declare_parameter('input_realsense_depth', '/camera/depth/image_rect_raw')
         self.declare_parameter('output_bbox_topic',     '/yolo/detect/bounding_box')
-        self.declare_parameter('interested_classes',    ['person', 'bottle', 'chair'])
+        self.declare_parameter('interested_classes',    ['person', 'chair'])
         self.declare_parameter('minimal_confidence',     0.4)
         
         self.topic_realsense_img        = self.get_parameter('input_realsense_img').value
@@ -41,10 +41,10 @@ class RealSenseSegmentation(Node):
         self.minimal_confidence         = self.get_parameter('minimal_confidence').value
         
         # Subscribe to the color and depth image topics
-        self.color_subscriber = self.create_subscription(Image, self.topic_realsense_img,   self.color_callback, 10)
-        self.depth_subscriber = self.create_subscription(Image, self.topic_realsense_depth, self.depth_callback, 10)
+        self.color_subscriber = self.create_subscription(Image, self.topic_realsense_img,   self.color_callback, 3)
+        self.depth_subscriber = self.create_subscription(Image, self.topic_realsense_depth, self.depth_callback, 3)
         
-        self.bounding_box_publisher = self.create_publisher(BoundingBoxes, self.topic_yolo_bbox, 10)
+        self.bounding_box_publisher = self.create_publisher(BoundingBoxes, self.topic_yolo_bbox, 3)
 
         self.color_image    = None
         self.boxes          = None
@@ -104,16 +104,18 @@ class RealSenseSegmentation(Node):
                     # Draw bounding box and annotations
                     label = f"{self.model.names[int(cls)]} {conf:.2f}"
                     cv2.putText(self.color_image, label, (center_x, center_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-                    depth = self.depth_image[center_y, center_x] / 1000.0
                     
                     leftmost_dist  :float = self.depth_image[leftmost.y, leftmost.x]      / 1000.0
                     rightmost_dist :float = self.depth_image[rightmost.y, rightmost.x]    / 1000.0
                     topmost_dist   :float = self.depth_image[topmost.y, topmost.x]        / 1000.0
                     bottommost_dist:float = self.depth_image[bottommost.y, bottommost.x]  / 1000.0
                     
-                    detected_box                = BoundingBox()
-                    detected_box.depth = min(leftmost_dist, rightmost_dist, topmost_dist, bottommost_dist)
+                    detected_box = BoundingBox()
+                    detected_box.depth = -1.0
+                    detected_box.depth = min(v for v in (leftmost_dist, rightmost_dist, topmost_dist, bottommost_dist) if v > 0.0)
+                    
+                    if detected_box.depth == -1.0:
+                        continue
 
                     # Create a BoundingBox object
                     detected_box.leftmost       = [int(value) for value in leftmost]
