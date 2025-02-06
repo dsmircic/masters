@@ -31,7 +31,7 @@ class Segment3D(Node):
         self.declare_parameter('minimum_probability',            0.3)
         self.declare_parameter('object_radius',                  0.5)
         self.declare_parameter('cube_step',                      0.1)
-        self.declare_parameter('qos',                            10)
+        self.declare_parameter('qos',                            3)
         
         self.bounding_boxes_topic                               = self.get_parameter('input_topic_bbox').value
         self.working_frame                                      = self.get_parameter('working_frame').value
@@ -46,15 +46,17 @@ class Segment3D(Node):
         self.fx:float = 898.6607
         self.fy:float = 898.1004
         self.cx:float = 642.3966
-        self.cy:float = 359.4919
+        self.cy:float = 359.4919 
 
         # Subscribers and Publishers
-        self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
-        
-        self.no_go_zone_publisher       = self.create_publisher(PointCloud2, self.no_go_topic,          self.qos)
+        self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes, self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
+        self.no_go_zone_publisher       = self.create_publisher(PointCloud2, self.no_go_topic, self.qos)
 
         self.original_bounding_boxes    = []
         self.marker_array               = MarkerArray()
+        
+        self.count = 0
+        self.publish_flag = False
 
     def publish_no_go_zones(self, bounding_boxes_msg):
         """Creates a pointcloud of no-go areas for the mobile robot.
@@ -76,7 +78,10 @@ class Segment3D(Node):
         for bbox in bounding_boxes_msg.boxes:
             objectClass                 = GetObject().createObject(bbox.class_label)
             
-            if bbox.class_label not in self.interested_classes or bbox.confidence < self.min_probability or objectClass == None:
+            self.publish_flag = True
+            
+            if bbox.class_label not in self.interested_classes or bbox.confidence < self.min_probability or objectClass == None or bbox.depth == 0:
+                self.publish_flag = False
                 continue
             
             object_radius: float    = objectClass.get_depth()
@@ -92,9 +97,15 @@ class Segment3D(Node):
                     for dz in np.arange((measured_distance), (measured_distance + object_radius), self.cube_step):
                         points.append((dz, -dx, -dy))
                         #print(f"dx: {dx}\ndy: {dy}\ndz: {dz}\n")
-
-            point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
-            self.no_go_zone_publisher.publish(point_cloud)
+                           
+            
+                
+        point_cloud = pc2.create_cloud(point_cloud.header, fields, points)
+        self.no_go_zone_publisher.publish(point_cloud)
+        self.count = 0
+        # print("Class: ", bbox.class_label)
+                
+            # self.count += 1
     
     def publish_markers(self):        
         self.markers_publisher.publish(self.marker_array)
