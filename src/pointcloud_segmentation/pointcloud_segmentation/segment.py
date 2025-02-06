@@ -11,6 +11,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 
 from sensor_msgs.msg import PointCloud2, PointField
 
@@ -42,6 +43,9 @@ class Segment3D(Node):
         self.cube_step                                          = self.get_parameter('cube_step').value
         self.object_radius                                      = self.get_parameter('object_radius').value
         self.qos                                                = self.get_parameter('qos').value
+        
+        qos_profile = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self.timer = self.create_timer(3.0, self.publish_no_go_zones)
 
         self.fx:float = 898.6607
         self.fy:float = 898.1004
@@ -49,9 +53,9 @@ class Segment3D(Node):
         self.cy:float = 359.4919
 
         # Subscribers and Publishers
-        self.no_go_zone_subscriber      = self.create_subscription(BoundingBoxes,   self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
+        self.no_go_zone_subscriber  = self.create_subscription(BoundingBoxes, self.bounding_boxes_topic,  self.publish_no_go_zones,   self.qos)
         
-        self.no_go_zone_publisher       = self.create_publisher(PointCloud2, self.no_go_topic,          self.qos)
+        self.no_go_zone_publisher   = self.create_publisher(PointCloud2, self.no_go_topic, qos_profile=qos_profile)
 
         self.original_bounding_boxes    = []
         self.marker_array               = MarkerArray()
